@@ -9,7 +9,6 @@ import datetime
 import random
 from typing import Any, List
 
-from appwrite.exception import AppwriteException
 from meta_ai_api_tool_call import MetaAI
 from pydantic_ai.models import Model
 from pydantic import BaseModel
