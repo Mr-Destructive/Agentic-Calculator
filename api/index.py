@@ -746,7 +746,7 @@ class handler(BaseHTTPRequestHandler):
         
         query = query_params.get('q', [''])[0]
         result = self.run_agent(query)
-        response_data = {"result": result}
+        response_data = {"result": result.output}
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
