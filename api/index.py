@@ -732,34 +732,89 @@ def mean(x: List[int]) -> float:
     return sum(x) / len(x)
 
 
-class handler(BaseHTTPRequestHandler):
-    def run_agent(self, query):
-        # Replace with your actual agent implementation
-        return agent.run_sync(query)
+from http.client import responses
+from urllib.parse import parse_qs
+import json
+import os
+from typing import Dict, Any, Optional
+
+# Import your agent module here
+# import agent
+
+async def run_agent(query):
+    """
+    Run the agent with the provided query using the defined agent with math tools.
+    """
+    try:
+        # Create a run context for the agent
+        run_context = RunContext()
+        
+        # Run the agent with the query
+        response = await agent.run_async(query, run_context=run_context)
+        
+        # Extract the text response - convert to string if it's a complex object
+        if hasattr(response, 'content'):
+            result = response.content
+        elif hasattr(response, '__str__'):
+            result = str(response)
+        else:
+            result = json.dumps(response) if isinstance(response, (dict, list)) else "Unknown response format"
+            
+        return result
+    except asyncio.TimeoutError:
+        raise Exception("Agent execution timed out")
+    except ValueError as e:
+        raise Exception(f"Invalid input: {str(e)}")
+    except Exception as e:
+        # Log the exception for debugging
+        print(f"Agent execution error: {str(e)}")
+        raise Exception(f"Error running agent: {str(e)}")
+
+def create_response(status_code: int, body: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """Create a standardized response format for Vercel functions."""
+    default_headers = {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+    }
     
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-        self.end_headers()
+    if headers:
+        default_headers.update(headers)
     
-    def do_GET(self):
-        parsed_path = urlparse(self.path)
-        query_params = parse_qs(parsed_path.query)
+    return {
+        "statusCode": status_code,
+        "body": json.dumps(body),
+        "headers": default_headers
+    }
+
+async def handler(request):
+    """
+    Main handler function for Vercel serverless function.
+    """
+    # Handle preflight OPTIONS request
+    if request.method == "OPTIONS":
+        return create_response(200, {})
+    
+    # Handle GET request
+    if request.method == "GET":
+        try:
+            # Get query parameter
+            url_query = request.query
+            query = url_query.get('q', '')
+            
+            if not query:
+                return create_response(400, {"error": "Missing query parameter 'q'"})
+            
+            # Run the agent
+            result = await run_agent(query)
+            
+            # Return the result
+            return create_response(200, {"result": result})
         
-        query = query_params.get('q', [''])[0]
-        
-        result = self.run_agent(query)
-        
-        # Prepare and send response
-        response_data = {"result": result}
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-        self.end_headers()
-        print(response_data)
-        self.wfile.write(json.dumps(response_data).encode('utf-8'))
-        return
+        except Exception as e:
+            print(f"Error processing request: {str(e)}")
+            return create_response(500, {"error": f"Internal server error: {str(e)}"})
+    
+    # Handle unsupported methods
+    return create_response(405, {"error": f"Method {request.method} not allowed"})
