@@ -1,12 +1,10 @@
-# api/index.py
 import json
-from urllib.parse import parse_qs
-import asyncio
-from http import HTTPStatus
 import math
 import datetime
 import random
+from http.server import BaseHTTPRequestHandler
 from typing import Any, List
+from urllib.parse import parse_qs, urlparse
 
 from meta_ai_api_tool_call import MetaAI
 from pydantic_ai.models import Model
@@ -731,109 +729,30 @@ def mean(x: List[int]) -> float:
     return sum(x) / len(x)
 
 
-from typing import Dict, Any, Optional
-async def run_agent(query):
-    """
-    Run the agent with the provided query using the defined agent with math tools.
-    """
-    try:
-        # Create a run context for the agent
-        run_context = RunContext()
-        
-        # Run the agent with the query
-        response = await agent.run_async(query, run_context=run_context)
-        
-        # Extract the text response - convert to string if it's a complex object
-        if hasattr(response, 'content'):
-            result = response.content
-        elif hasattr(response, '__str__'):
-            result = str(response)
-        else:
-            result = json.dumps(response) if isinstance(response, (dict, list)) else "Unknown response format"
-            
-        return result
-    except asyncio.TimeoutError:
-        raise Exception("Agent execution timed out")
-    except ValueError as e:
-        raise Exception(f"Invalid input: {str(e)}")
-    except Exception as e:
-        # Log the exception for debugging
-        print(f"Agent execution error: {str(e)}")
-        raise Exception(f"Error running agent: {str(e)}")
-
-async def handler(request):
-    """
-    Main handler function for Vercel serverless function.
+class handler(BaseHTTPRequestHandler):
+    def run_agent(self, query):
+        return agent.run_sync(query)
     
-    Args:
-        request: The incoming HTTP request object
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        self.end_headers()
+    
+    def do_GET(self):
+        parsed_path = urlparse(self.path)
+        query_params = parse_qs(parsed_path.query)
         
-    Returns:
-        A dictionary with status_code, body, and headers for Vercel's response
-    """
-    # Set default headers for CORS
-    headers = {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization'
-    }
-    
-    # Handle preflight OPTIONS request
-    if request.method == "OPTIONS":
-        return {
-            "status": HTTPStatus.OK,
-            "body": "",
-            "headers": headers
-        }
-    
-    # Handle GET request
-    if request.method == "GET":
-        try:
-            # Get query parameter
-            query_params = request.query_params if hasattr(request, 'query_params') else {}
-            
-            # Try multiple ways to get the query parameter based on Vercel's request object format
-            query = ""
-            if hasattr(request, 'query') and 'q' in request.query:
-                query = request.query['q']
-            elif 'q' in query_params:
-                query = query_params['q']
-            elif hasattr(request, 'url') and '?' in request.url:
-                # Parse query string manually if needed
-                query_str = request.url.split('?', 1)[1]
-                parsed_qs = parse_qs(query_str)
-                query = parsed_qs.get('q', [''])[0]
-            
-            if not query:
-                return {
-                    "status": HTTPStatus.BAD_REQUEST,
-                    "body": json.dumps({"error": "Missing query parameter 'q'"}),
-                    "headers": headers
-                }
-            
-            # Run the agent
-            result = await run_agent(query)
-            
-            # Return the result
-            return {
-                "status": HTTPStatus.OK,
-                "body": json.dumps({"result": result}),
-                "headers": headers
-            }
-        
-        except Exception as e:
-            # Log the error for debugging
-            print(f"Error processing request: {str(e)}")
-            return {
-                "status": HTTPStatus.INTERNAL_SERVER_ERROR,
-                "body": json.dumps({"error": f"Internal server error: {str(e)}"}),
-                "headers": headers
-            }
-    
-    # Handle unsupported methods
-    return {
-        "status": HTTPStatus.METHOD_NOT_ALLOWED,
-        "body": json.dumps({"error": f"Method {request.method} not allowed"}),
-        "headers": headers
-    }
+        query = query_params.get('q', [''])[0]
+        result = self.run_agent(query)
+        response_data = {"result": result}
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        self.end_headers()
+        self.wfile.write(json.dumps(response_data).encode('utf-8'))
+        print(response_data)
+        return
