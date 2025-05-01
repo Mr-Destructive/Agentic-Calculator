@@ -733,9 +733,9 @@ def mean(x: List[int]) -> float:
 
 
 class handler(BaseHTTPRequestHandler):
-    async def run_agent(self, query):
+    def run_agent(self, query):
         # Replace with your actual agent implementation
-        return await agent.run(query)
+        return agent.run_sync(query)
     
     def do_OPTIONS(self):
         self.send_response(200)
@@ -745,15 +745,12 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
     
     def do_GET(self):
-        # Parse query parameters
         parsed_path = urlparse(self.path)
         query_params = parse_qs(parsed_path.query)
         
-        # Get the query parameter
         query = query_params.get('q', [''])[0]
         
-        # Run the agent with the query
-        result = asyncio.run(self.run_agent(query))
+        result = self.run_agent(query)
         
         # Prepare and send response
         response_data = {"result": result}
