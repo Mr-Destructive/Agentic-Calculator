@@ -1,9 +1,8 @@
 # api/index.py
-from http.server import BaseHTTPRequestHandler
 import json
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs
 import asyncio
-
+from http import HTTPStatus
 import math
 import datetime
 import random
@@ -732,15 +731,7 @@ def mean(x: List[int]) -> float:
     return sum(x) / len(x)
 
 
-from http.client import responses
-from urllib.parse import parse_qs
-import json
-import os
 from typing import Dict, Any, Optional
-
-# Import your agent module here
-# import agent
-
 async def run_agent(query):
     """
     Run the agent with the provided query using the defined agent with math tools.
@@ -770,51 +761,79 @@ async def run_agent(query):
         print(f"Agent execution error: {str(e)}")
         raise Exception(f"Error running agent: {str(e)}")
 
-def create_response(status_code: int, body: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
-    """Create a standardized response format for Vercel functions."""
-    default_headers = {
+async def handler(request):
+    """
+    Main handler function for Vercel serverless function.
+    
+    Args:
+        request: The incoming HTTP request object
+        
+    Returns:
+        A dictionary with status_code, body, and headers for Vercel's response
+    """
+    # Set default headers for CORS
+    headers = {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization'
     }
     
-    if headers:
-        default_headers.update(headers)
-    
-    return {
-        "statusCode": status_code,
-        "body": json.dumps(body),
-        "headers": default_headers
-    }
-
-async def handler(request):
-    """
-    Main handler function for Vercel serverless function.
-    """
     # Handle preflight OPTIONS request
     if request.method == "OPTIONS":
-        return create_response(200, {})
+        return {
+            "status": HTTPStatus.OK,
+            "body": "",
+            "headers": headers
+        }
     
     # Handle GET request
     if request.method == "GET":
         try:
             # Get query parameter
-            url_query = request.query
-            query = url_query.get('q', '')
+            query_params = request.query_params if hasattr(request, 'query_params') else {}
+            
+            # Try multiple ways to get the query parameter based on Vercel's request object format
+            query = ""
+            if hasattr(request, 'query') and 'q' in request.query:
+                query = request.query['q']
+            elif 'q' in query_params:
+                query = query_params['q']
+            elif hasattr(request, 'url') and '?' in request.url:
+                # Parse query string manually if needed
+                query_str = request.url.split('?', 1)[1]
+                parsed_qs = parse_qs(query_str)
+                query = parsed_qs.get('q', [''])[0]
             
             if not query:
-                return create_response(400, {"error": "Missing query parameter 'q'"})
+                return {
+                    "status": HTTPStatus.BAD_REQUEST,
+                    "body": json.dumps({"error": "Missing query parameter 'q'"}),
+                    "headers": headers
+                }
             
             # Run the agent
             result = await run_agent(query)
             
             # Return the result
-            return create_response(200, {"result": result})
+            return {
+                "status": HTTPStatus.OK,
+                "body": json.dumps({"result": result}),
+                "headers": headers
+            }
         
         except Exception as e:
+            # Log the error for debugging
             print(f"Error processing request: {str(e)}")
-            return create_response(500, {"error": f"Internal server error: {str(e)}"})
+            return {
+                "status": HTTPStatus.INTERNAL_SERVER_ERROR,
+                "body": json.dumps({"error": f"Internal server error: {str(e)}"}),
+                "headers": headers
+            }
     
     # Handle unsupported methods
-    return create_response(405, {"error": f"Method {request.method} not allowed"})
+    return {
+        "status": HTTPStatus.METHOD_NOT_ALLOWED,
+        "body": json.dumps({"error": f"Method {request.method} not allowed"}),
+        "headers": headers
+    }
